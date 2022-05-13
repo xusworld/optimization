@@ -22,8 +22,8 @@ double time_diff_ms(struct timeval *start, struct timeval *end) {
 }
 
 double benchmark(std::function<void(void)> func) {
-  auto warmup_times = 10;
-  auto run_times = 10;
+  auto warmup_times = 20;
+  auto run_times = 20;
 
   // warmup
   for (auto i = 0; i < warmup_times; ++i) func();
