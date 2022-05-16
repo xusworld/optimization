@@ -1,177 +1,144 @@
 #include "common.h"
 
+
 namespace optim4 {
 
-void AddDot1x4( int k, double *a, int lda,  double *b, int ldb, double *c, int ldc ) {
-  /* So, this routine computes four elements of C: 
 
-           C( 0, 0 ), C( 0, 1 ), C( 0, 2 ), C( 0, 3 ).  
-
-     Notice that this routine is called with c = C( i, j ) in the
-     previous routine, so these are actually the elements 
-
-           C( i, j ), C( i, j+1 ), C( i, j+2 ), C( i, j+3 ) 
-	  
-     in the original matrix C.
-
-     In this version, we use pointer to track where in four columns of B we are */
-
-  int p;
-  register double 
-    /* hold contributions to
-       C( 0, 0 ), C( 0, 1 ), C( 0, 2 ), C( 0, 3 ) */
-       c_00_reg,   c_01_reg,   c_02_reg,   c_03_reg,  
-    /* holds A( 0, p ) */
-       a_0p_reg;
-  double 
-    /* Point to the current elements in the four columns of B */
-    *bp0_pntr, *bp1_pntr, *bp2_pntr, *bp3_pntr; 
-    
-  bp0_pntr = &B( 0, 0 );
-  bp1_pntr = &B( 0, 1 );
-  bp2_pntr = &B( 0, 2 );
-  bp3_pntr = &B( 0, 3 );
-
-  c_00_reg = 0.0; 
-  c_01_reg = 0.0; 
-  c_02_reg = 0.0; 
-  c_03_reg = 0.0;
- 
-  for ( p=0; p<k; p+=4 ){
-    a_0p_reg = A( 0, p );
-
-    c_00_reg += a_0p_reg * *bp0_pntr;
-    c_01_reg += a_0p_reg * *bp1_pntr;
-    c_02_reg += a_0p_reg * *bp2_pntr;
-    c_03_reg += a_0p_reg * *bp3_pntr;
-
-    a_0p_reg = A( 0, p+1 );
-
-    c_00_reg += a_0p_reg * *(bp0_pntr+1);
-    c_01_reg += a_0p_reg * *(bp1_pntr+1);
-    c_02_reg += a_0p_reg * *(bp2_pntr+1);
-    c_03_reg += a_0p_reg * *(bp3_pntr+1);
-
-    a_0p_reg = A( 0, p+2 );
-
-    c_00_reg += a_0p_reg * *(bp0_pntr+2);
-    c_01_reg += a_0p_reg * *(bp1_pntr+2);
-    c_02_reg += a_0p_reg * *(bp2_pntr+2);
-    c_03_reg += a_0p_reg * *(bp3_pntr+2);
-
-    a_0p_reg = A( 0, p+3 );
-
-    c_00_reg += a_0p_reg * *(bp0_pntr+3);
-    c_01_reg += a_0p_reg * *(bp1_pntr+3);
-    c_02_reg += a_0p_reg * *(bp2_pntr+3);
-    c_03_reg += a_0p_reg * *(bp3_pntr+3);
-
-    bp0_pntr+=4;
-    bp1_pntr+=4;
-    bp2_pntr+=4;
-    bp3_pntr+=4;
-  }
-
-  C( 0, 0 ) += c_00_reg; 
-  C( 0, 1 ) += c_01_reg; 
-  C( 0, 2 ) += c_02_reg; 
-  C( 0, 3 ) += c_03_reg;
-}
-
-void GEMM(int m, int n, int k, double *a, double* b, double* c) { 
-  int i, j;
-
-  // Loop over the columns of C
-  for (j = 0; j < n; j += 4) {      
-    // Loop over the rows of C   
-    for (i = 0;i < m; i++) {    
-      //  Update the C( i,j ) with the inner product of the ith row of A and the jth column of B  
-      AddDot1x4( k, &A( i,0 ), sa, &B( 0,j ), sb, &C( i,j ), sc );
-    }
-  }
-}
+#define BLOCK 128
 
 
-void AddDot1x4_Unloop( int k, double *a, int lda,  double *b, int ldb, double *c, int ldc )
+#define min( i, j ) ( (i)<(j) ? (i): (j) )
+
+//#include <immintrin.h>  // AVX AVX2 FMA
+#include <mmintrin.h>
+#include <xmmintrin.h>  // SSE
+#include <pmmintrin.h>  // SSE2
+#include <emmintrin.h>  // SSE3
+
+typedef union
 {
-  /* So, this routine computes four elements of C: 
-           C( 0, 0 ), C( 0, 1 ), C( 0, 2 ), C( 0, 3 ).  
-     Notice that this routine is called with c = C( i, j ) in the
-     previous routine, so these are actually the elements 
-           C( i, j ), C( i, j+1 ), C( i, j+2 ), C( i, j+3 ) 
-	  
-     in the original matrix C.
-     We now unroll the loop */
+  __m128d v;
+  double d[2];
+} Vec2;
 
+void AddDot4x4(int k, double* a, int sa, double* b, int sb, double* c, int sc) {
   int p;
-  register double 
-    /* hold contributions to
-       C( 0, 0 ), C( 0, 1 ), C( 0, 2 ), C( 0, 3 ) */
-       c_00_reg,   c_01_reg,   c_02_reg,   c_03_reg,  
-    /* holds A( 0, p ) */
-       a_0p_reg;
-  double 
-    /* Point to the current elements in the four columns of B */
-    *bp0_pntr, *bp1_pntr, *bp2_pntr, *bp3_pntr; 
-    
-  bp0_pntr = &B( 0, 0 );
-  bp1_pntr = &B( 0, 1 );
-  bp2_pntr = &B( 0, 2 );
-  bp3_pntr = &B( 0, 3 );
-
-  c_00_reg = 0.0; 
-  c_01_reg = 0.0; 
-  c_02_reg = 0.0; 
-  c_03_reg = 0.0;
  
-  for ( p=0; p<k; p+=4 ){
-    a_0p_reg = A( 0, p );
 
-    c_00_reg += a_0p_reg * *bp0_pntr++;
-    c_01_reg += a_0p_reg * *bp1_pntr++;
-    c_02_reg += a_0p_reg * *bp2_pntr++;
-    c_03_reg += a_0p_reg * *bp3_pntr++;
+  Vec2 c_00_c_01_vreg, c_02_c_03_vreg,
+       c_10_c_11_vreg, c_12_c_13_vreg,
+       c_20_c_21_vreg, c_22_c_23_vreg,
+       c_30_c_31_vreg, c_32_c_33_vreg;
+  
+  double *a0p_pntr, *a1p_pntr, *a2p_pntr, *a3p_pntr; 
+  Vec2 a_0p_vreg, a_1p_vreg, a_2p_vreg, a_3p_vreg;
 
-    a_0p_reg = A( 0, p+1 );
+  Vec2 b_p0_b_p1_vreg, b_p2_b_p3_vreg;
 
-    c_00_reg += a_0p_reg * *bp0_pntr++;
-    c_01_reg += a_0p_reg * *bp1_pntr++;
-    c_02_reg += a_0p_reg * *bp2_pntr++;
-    c_03_reg += a_0p_reg * *bp3_pntr++;
 
-    a_0p_reg = A( 0, p+2 );
+  a0p_pntr = &A(0, 0);
+  a1p_pntr = &A(1, 0);
+  a2p_pntr = &A(2, 0);
+  a3p_pntr = &A(3, 0);
 
-    c_00_reg += a_0p_reg * *bp0_pntr++;
-    c_01_reg += a_0p_reg * *bp1_pntr++;
-    c_02_reg += a_0p_reg * *bp2_pntr++;
-    c_03_reg += a_0p_reg * *bp3_pntr++;
+  c_00_c_01_vreg.v = _mm_setzero_pd();
+  c_02_c_03_vreg.v = _mm_setzero_pd();
+  c_10_c_11_vreg.v = _mm_setzero_pd();
+  c_12_c_13_vreg.v = _mm_setzero_pd();
+  c_20_c_21_vreg.v = _mm_setzero_pd();
+  c_22_c_23_vreg.v = _mm_setzero_pd();
+  c_30_c_31_vreg.v = _mm_setzero_pd();
+  c_32_c_33_vreg.v = _mm_setzero_pd();
 
-    a_0p_reg = A( 0, p+3 );
+  for(p = 0; p < k; ++p) {
+    // Load B(p, 0), B(p, 1), B(p, 2) and B(p, 3)
+    b_p0_b_p1_vreg.v = _mm_load_pd((double *)&B(p, 0)); 
+    b_p2_b_p3_vreg.v = _mm_load_pd((double *)&B(p, 2));
 
-    c_00_reg += a_0p_reg * *bp0_pntr++;
-    c_01_reg += a_0p_reg * *bp1_pntr++;
-    c_02_reg += a_0p_reg * *bp2_pntr++;
-    c_03_reg += a_0p_reg * *bp3_pntr++;
+    double tmp[2];
+    _mm_storeu_pd(tmp, b_p0_b_p1_vreg.v); 
+    double tmp1[2];
+    _mm_storeu_pd(tmp1, b_p2_b_p3_vreg.v); 
+
+    // Load A(0, p), A(1, p), A(2, p) and A(3, p)
+    a_0p_vreg.v = _mm_loaddup_pd((double *)a0p_pntr++);
+    a_1p_vreg.v = _mm_loaddup_pd((double *)a1p_pntr++);
+    a_2p_vreg.v = _mm_loaddup_pd((double *)a2p_pntr++);
+    a_3p_vreg.v = _mm_loaddup_pd((double *)a3p_pntr++);
+
+    // First row
+    c_00_c_01_vreg.v += a_0p_vreg.v * b_p0_b_p1_vreg.v;
+    c_02_c_03_vreg.v += a_0p_vreg.v * b_p2_b_p3_vreg.v;
+    // Second row
+    c_10_c_11_vreg.v += a_1p_vreg.v * b_p0_b_p1_vreg.v;
+    c_12_c_13_vreg.v += a_1p_vreg.v * b_p2_b_p3_vreg.v;
+    // Third row 
+    c_20_c_21_vreg.v += a_2p_vreg.v * b_p0_b_p1_vreg.v;
+    c_22_c_23_vreg.v += a_2p_vreg.v * b_p2_b_p3_vreg.v;
+    // Fourth row
+    c_30_c_31_vreg.v += a_3p_vreg.v * b_p0_b_p1_vreg.v;
+    c_32_c_33_vreg.v += a_3p_vreg.v * b_p2_b_p3_vreg.v;
   }
+ 
+  C(0, 0) += c_00_c_01_vreg.d[0];
+  C(0, 1) += c_00_c_01_vreg.d[1];
+  C(0, 2) += c_02_c_03_vreg.d[0];
+  C(0, 3) += c_02_c_03_vreg.d[1];
+ 
+  C(1, 0) += c_10_c_11_vreg.d[0];
+  C(1, 1) += c_10_c_11_vreg.d[1];
+  C(1, 2) += c_12_c_13_vreg.d[0];
+  C(1, 3) += c_12_c_13_vreg.d[1];
+ 
+  C(2, 0) += c_20_c_21_vreg.d[0];
+  C(2, 1) += c_20_c_21_vreg.d[1];
+  C(2, 2) += c_22_c_23_vreg.d[0];
+  C(2, 3) += c_22_c_23_vreg.d[1];
+ 
+  C(3, 0) += c_30_c_31_vreg.d[0];
+  C(3, 1) += c_30_c_31_vreg.d[1];
+  C(3, 2) += c_32_c_33_vreg.d[0];
+  C(3, 3) += c_32_c_33_vreg.d[1];
 
-  C( 0, 0 ) += c_00_reg; 
-  C( 0, 1 ) += c_01_reg; 
-  C( 0, 2 ) += c_02_reg; 
-  C( 0, 3 ) += c_03_reg;
 }
 
 
-void GEMM_UNLOOP(int m, int n, int k, double *a, double* b, double* c) { 
-  int i, j;
+void PackMatrixB(int k, double *b, int sb, double *b_to)
+{
+  int j;
 
-  // Loop over the columns of C
-  for (j = 0; j < n; j += 4) {      
-    // Loop over the rows of C   
-    for (i = 0;i < m; i++) {    
-      //  Update the C( i,j ) with the inner product of the ith row of A and the jth column of B  
-      AddDot1x4_Unloop( k, &A( i,0 ), sa, &B( 0,j ), sb, &C( i,j ), sc );
+  for( j=0; j<k; j++){  /* loop over columns of A */
+    double *b_ij_pntr = &B(j, 0);
+    *b_to++ = b_ij_pntr[0];
+    *b_to++ = b_ij_pntr[1];
+    *b_to++ = b_ij_pntr[2];
+    *b_to++ = b_ij_pntr[3];
+  }
+}
+
+void InnerKernel(int m, int n, int k, double *a, int sa, double *b, int sb, double *c, int sc) {
+  int i, j;
+  double packedB[k * n];
+ 
+  for (i=0; i < m; i+=4) {        
+    for (j=0; j < n; j+=4) {
+      if(i == 0) PackMatrixB(k, &B(0, j), sb, &packedB[j * k]);
+      AddDot4x4(k, &A(i, 0), sa, &packedB[j * k], 4, &C(i, j), sc);
+    }
+  }
+
+}
+
+void GEMM(int m, int n, int k, double* a, double* b, double* c) { 
+  int i, j, p, pb, ib;
+  for (i = 0; i < m; i+=BLOCK) {
+    ib = min(m-i, BLOCK); 
+
+    for (p = 0; p < k; p+=BLOCK) {
+      pb = min(k-p, BLOCK);
+      InnerKernel(ib, n, pb, &A(i, p), sa, &B(p, 0), sb, &C(i, 0), sc);
     }
   }
 }
 
-} // namespace optim4
+} // namespace optim3 

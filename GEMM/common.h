@@ -8,9 +8,9 @@
 using namespace std;
 
 
-#define A(i,j) a[ (j)*sa + (i) ]
-#define B(i,j) b[ (j)*sb + (i) ]
-#define C(i,j) c[ (j)*sc + (i) ]
+#define A(i,j) a[ (i)*sa + (j) ]
+#define B(i,j) b[ (i)*sb + (j) ]
+#define C(i,j) c[ (i)*sc + (j) ]
 
 int sa;
 int sb;
